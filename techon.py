@@ -1,6 +1,8 @@
 import sys
+import os
 import json
 from copy import deepcopy
+from random import randrange
 
 from models.game import Bug, Tower, Shoot, GameException
 
@@ -9,6 +11,11 @@ class GameHandler(object):
     def __init__(self, inputFile=None, outputFile=None):
         self.inputFile = inputFile
         self.outputFile = outputFile
+
+        try:
+            os.remove(self.outputFile)
+        except:
+            pass
 
         self.life = 0
         self.money = 0
@@ -27,6 +34,16 @@ class GameHandler(object):
         self._readInputFile()
         self._buildRoad()
         self._getBestTowerPositions()
+
+        # add road to each bug
+        for _, bug in self.bugs.iteritems():
+            bug.road = deepcopy(self.road)
+
+    def __repr__(self):
+        return json.dumps(vars(self))
+
+    def __str__(self):
+        return json.dumps(vars(self))
 
     def _readInputFile(self):
         with open(self.inputFile, 'r') as f:
@@ -179,13 +196,13 @@ class GameHandler(object):
             self.bestTowerPositions.append(position)
 
 
-    def printOutput(self):
-        with open(self.outputFile, 'w') as f:
-            for action in self.actions:
+    def printOutput(self, actions):
+        with open(self.outputFile, 'a') as f:
+            for action in actions:
                 if isinstance(action, Tower):
                     f.write('action=new_tower\n')
                     f.write('frame=%s\n' % action.frame)
-                    f.write('name=tower_%s%s\n' % (action.x, action.y))
+                    f.write('name=%s\n' % (action.name))
                     f.write('position=%s,%s\n' % (action.y, action.x))
                     f.write('colors=%s\n' % ','.join(['%s:%s' % (key, value) for key, value in action.colors.iteritems() if value > 0]))
                 elif isinstance(action, Shoot):
@@ -196,21 +213,50 @@ class GameHandler(object):
 
                 f.write('\n')
 
+    def shootBug(self, tower, bug, do_damage):
+        colateral = 0
+        bugLife = bug.life
+        for color, value in tower.colors.iteritems():
+            new_value = bug.colors.get(color, 0) - value
+            if new_value < 0:
+                colateral -= new_value
+                new_value = 0
+            bugLife -= bug.colors.get(color, 0) - new_value
+            if do_damage:
+                bug.colors[color] = new_value
 
-    def moveActiveBugs(self, life, frame):
-        for _, bug in self.bugs.iteritems():
+        if not do_damage:
+            return colateral, bugLife
+        return colateral
+
+    def bestTarget(self, tower, backupBugs, life, frame):
+        target = None
+        maxSavedLife = 0
+
+        for _, bug in backupBugs.iteritems():
+            # if bug is dead or not in game, continue
             if not bug.isAlive or bug.frame > frame:
                 continue
-            nextPosition = self.road[(bug.x, bug.y)]
-            if self.table[nextPosition[0]][nextPosition[1]] != 'X':
-                bug.x = nextPosition[0]
-                bug.y = nextPosition[1]
-            else:        
-                life -= bug.life
-                if life < 0:
-                    raise GameException('Game over at frame #%s' % frame)
 
-        return life
+            if max(abs(bug.x - tower.x), abs(bug.y - tower.y)) > self.towerRange or bug.stepsLeft == 0:
+                continue
+
+            lifeBeforeShot = bug.life
+            colateral, lifeAfterShot = self.shootBug(tower, bug, False)
+            if colateral > 0: #life
+                continue
+
+
+            if lifeBeforeShot - lifeAfterShot - colateral > maxSavedLife:
+                target = bug
+                maxSavedLife = lifeBeforeShot - bug.life - colateral
+
+            # if bug is in range of tower, pick the closest to end of road
+            # if tower.distanceTo(bug) < self.towerRange:
+            #    if target is None or target.stepsLeft > bug.stepsLeft:
+            #        pass
+
+        return target
 
     def executeAction(self, action, life, money, frame):
         if action.frame != frame:
@@ -231,8 +277,6 @@ class GameHandler(object):
 
             # pay for tower
             money -= self.towerCost 
-            if money < 0:
-                raise GameException('Not enough money for tower #%s' % action.name)
 
         elif isinstance(action, Shoot):
             # shoot bug
@@ -242,204 +286,147 @@ class GameHandler(object):
             if max(abs(bug.x - tower.x), abs(bug.y - tower.y)) > self.towerRange:
                 raise GameException('Bug #%s is too far from tower #%s' % (bug.name, tower.name))   
 
-            for key, value in tower.colors.iteritems():
-                bug.colors[key] -= value
+            colateral = self.shootBug(tower, bug, True)
 
-                # check extra damage, and 
-                # add money if bug is dead
-                if bug.life <= 0:
-                    life += bug.life
-                    money += self.reward
-                    print '#%s extra kill by #%s life=%s, money=%s' % (action.bugName, action.towerName, life, money)
+            if colateral > 0:
+                life -= colateral
+                print '#%s extra kill by #%s life=%s, money=%s' % (action.bugName, action.towerName, life, money)
 
-            if life < 0:
-                raise GameException('Game over at frame #%s' % frame)
+            if bug.life == 0:
+                money += self.reward
+                print 'Bug #%s was killed by tower #%s' % (action.bugName, action.towerName)
 
-        return life, money
+            print 'Bug #{0} was shot.'.format(bug.name), vars(bug)
 
+        return life, money 
 
-    def nextGameState(self, life, money, frame):
-        # move all avtive bugs
-        life = self.moveActiveBugs(life, frame)
+    def nextGameState(self, actions, life, money, frame):
+        bugsToRemove = []
 
-        # get actions by frame
-        actions = self.getActions(life, money, frame)
+        # move active bugs
+        for _, bug in self.bugs.iteritems():
+            if not bug.isAlive:
+                continue
 
-        # check actions
-        for i in xrange(1, len(actions)):
-            if (actions[i - 1].frame > actions[i].frame or (
-                actions[i - 1].frame == actions[i].frame and 
-                isinstance(actions[i - 1], Shoot) and isinstance(actions[i], Tower))
-            ):
-                raise GameException('Frames are not in order: %s' % i)
+            try:
+                bug.move(frame)
+            except KeyError:
+                life -= bug.life
+                print 'Bug #%s got to X with life=%s: %s' % (bug.name, bug.life, bug.colors)
+                bugsToRemove.append(bug.name)
 
-        # execute each action
+        for bugName in bugsToRemove:
+            self.bugs.pop(bugName)
+
         for action in actions:
             life, money = self.executeAction(action, life, money, frame)
 
-        return life, money, frame + 1
+        return life, money
 
-    def getBestTarget(self, tower, life, money, frame):
+    def findSolution(self):
+        frame = 0
+        life = self.life
+        money = self.money
+
+        actions = [
+            ## Map 1
+            # Tower('tower_0', 0, 1, 3, {'red': 40, 'blue': 0}),
+            # Tower('tower_1', 0, 2, 5, {'red': 33, 'blue': 0}),
+            # Tower('tower_2', 0, 3, 2, {'red': 36, 'blue': 0}),
+            # Tower('tower_3', 0, 0, 3, {'red': 11, 'blue': 7}),
+            # Tower('tower_4', 0, 1, 1, {'red': 37, 'blue': 14}),
+
+            ## Map 2
+            Tower('tower_0', 0, self.bestTowerPositions[-28][0], ),
+
+        ]
+
+        # numberOfTowers = 4
+        # for i in xrange(numberOfTowers):
+        #    t = Tower('tower_%s' % i, 0, self.bestTowerPositions[-i - 1][0], self.bestTowerPositions[-i - 1][1], {'red': randrange(0, 1600), 'blue': randrange(0, 600)})
+        #    actions.append(t)
+
+
+        for tower in actions:
+            self.towers[tower.name] = tower
+
+        lastFrame = 0
         for _, bug in self.bugs.iteritems():
-            # ignore ig bug is not in frame or dead
-            if not bug.isAlive or bug.frame > frame:
-                continue
+            if lastFrame < bug.frame:
+                lastFrame = bug.frame
+
+        for frame in xrange(len(self.road) + lastFrame + 1):
+            print '---------------------------- FRAME {0} ----------------------'.format(frame)
 
             backupBugs = deepcopy(self.bugs)
-            try:
-                action = Shoot(frame, tower.name, bug.name)
-                self.executeAction(action, life, money, frame)
-                return bug
-            except GameException:
-                pass
-            self.bugs = backupBugs
+            for _, bug in backupBugs.iteritems():
+                try:
+                    bug.move(frame) 
+                except KeyError:
+                    bug.colors = {}
 
-        return None
+            for _, tower in self.towers.iteritems():
+                target = self.bestTarget(tower, backupBugs, life, frame)
+                if target:
+                    self.shootBug(tower, target, True)
 
-    def getActions(self, life, money, frame):
-        actions = []
-        if frame == 0:
-            numberOfTowers = 1
-            for towerIndex in xrange(numberOfTowers):
-                position = self.bestTowerPositions.pop()
-                tower = Tower('tower_%s' % towerIndex, 0, position[0], position[1], {'red': 5, 'blue': 0 if towerIndex == 1 else 7})
-                self.towers[tower.name] = tower
-                actions.append(tower)
-
-        for _, tower in self.towers.iteritems():
-            target = self.getBestTarget(tower, life, money, frame)
-            if target:
-                shoot = Shoot(frame, tower.name, target.name)
-                actions.append(shoot)
-
-        return actions
+                    shoot = Shoot(frame, tower.name, target.name)
+                    actions.append(shoot)
+                    # print vars(target)
 
 
-    def generateSolution(self):
-        life, money, frame = self.life, self.money, 0
+            print actions
+            self.printOutput(actions)
 
-        while True:
-            print 'Frame:', frame
-            print '-------------'
-            life, money, frame = self.nextGameState(life, money, frame)
-            print 'life=%s money=%s' % (life, money)
+            life, money = self.nextGameState(actions, life, money, frame)
 
+            print 'after actions: life={0} money={1}'.format(life, money)
 
-    def test(self, fromFile=False):
-        backupMoney = deepcopy(self.money)
-        backupLife = deepcopy(self.life)
-        backupBugs = deepcopy(self.bugs)
+            if life <= 0:
+                raise GameException('Game Over. life={0} money={1} frame={2}'.format(life, money, frame))
 
-        if fromFile:
-            self._readOutputFile()
+            actions = []
 
-        for i in xrange(1, len(self.actions)):
-            if (self.actions[i - 1].frame > self.actions[i].frame or (
-                self.actions[i - 1].frame == self.actions[i].frame and 
-                isinstance(self.actions[i - 1], Shoot) and isinstance(self.actions[i], Tower))
-            ):
-                raise GameException('Frames are not in order: %s' % i)
-
-        frame = 0
-        while True:
-            print 'Frame: ', frame
-            print '-----------------'
-
-            for bugName, bug in self.bugs.iteritems():
-                if not bug.isAlive or bug.frame > frame:
-                    continue
-                nextPosition = self.road[(bug.x, bug.y)]
-                if self.table[nextPosition[0]][nextPosition[1]] != 'X':
-                    bug.x = nextPosition[0]
-                    bug.y = nextPosition[1]
-                else:        
-                    self.life -= bug.life
-
-            for action in self.actions:
-                if action.frame < frame:
-                    continue
-                if action.frame > frame:
-                    break
-
-                if isinstance(action, Tower):
-                    print action
-
-                    if self.table[action.x][action.y] != '0':
-                        raise GameException('Tower #%s position is not valid' % action.name)
-                    if len(action.colors) > 5:
-                        raise GameException('Tower #%s fires more than 5 colors' % action.name)
-                    if len(action.name) > 16:
-                        raise GameException('Tower name has more than 16 chars')
-                    for color, value in action.colors.iteritems():
-                        if value > 100000:
-                            raise GameException('Tower #%s has big damage: #%s = %s' % (action.name, color, value))
-                        if value < 0:
-                            raise GameException('Tower #%s has negative damage: #%s = %s' % (action.name, color, value))
-
-                    # pay for tower
-                    self.money -= self.towerCost 
-                    if self.money < 0:
-                        raise GameException('Not enough money for tower #%s' % action.name)
-
-                elif isinstance(action, Shoot):
-                    # shoot bug
-                    tower = self.towers[action.towerName]
-                    bug = self.bugs[action.bugName]
-
-                    print action, '~>', bug
-
-                    if max(abs(bug.x - tower.x), abs(bug.y - tower.y)) > self.towerRange:
-                        raise GameException('Bug #%s is too far from tower #%s' % (bug.name, tower.name))   
-
-                    for key, value in tower.colors.iteritems():
-                        bug.colors[key] -= value
-
-                        # check extra damage, and 
-                        # add money if bug is dead
-                        if bug.life <= 0:
-                            self.life += bug.life
-                            self.money += self.reward
-                            print '#%s extra kill by #%s life=%s, money=%s' % (action.bugName, action.towerName, self.life, self.money)
-
-                    if self.life < 0:
-                        raise GameException('Game over at frame #%s' % frame)
-
-            # end of actions
-            if frame == self.actions[-1].frame:
-                break
-            
-            print 'Frame=%s Money=%s Life=%s\n' % (frame, self.money, self.life)
-            frame += 1
-
-        data = (deepcopy(self.life), deepcopy(self.money))
-        
-        self.life = backupLife
-        self.money = backupMoney
-        self.bugs = backupBugs
-
-        return data
-
-
-    def __repr__(self):
-        return json.dumps(vars(self))
-
-    def __str__(self):
-        return json.dumps(vars(self))
+            print '\n'
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
         print 'No input file'
     else:
         inputFile = '%s' % sys.argv[1]
-        outputFile = 'output/%s' % sys.argv[1].split('/')[-1]
+        outputFile = 'output/%s_solution' % sys.argv[1].split('/')[-1]
         
         game = GameHandler(inputFile=inputFile, outputFile=outputFile)
 
-        game.generateSolution()
+        table = deepcopy(game.table)
+        positions = deepcopy(game.bestTowerPositions)
+        index = 0
+        while len(positions) > 0:
+            x, y = positions.pop()
+            table[x][y] = 'T%s' % index
+            index += 1
+        for row in table:
+            print '\t'.join(row)
 
-        #game.findSolution()
-        #game.printOutput()
 
-        # print game.test()
-        # print vars(game)
+        for _, bug1 in game.bugs.iteritems():
+            for _, bug2 in game.bugs.iteritems():
+                if bug1.name != bug2.name:
+                    print bug1.name, '%', bug2.name
+                    for color, value in bug1.colors.iteritems():
+                        k = bug2.colors.get(color, 0)
+                        #print color, float(value) / k, float(value) % k
+                    
+
+
+        while True:
+            gameCopy = deepcopy(game)
+            try:
+                print gameCopy.findSolution()
+            except GameException as e:
+                print e.message
+                break
+            else:
+                print '\n\n\nEvrika!!!!!!!!!!!!!\n\n'
+                break
 

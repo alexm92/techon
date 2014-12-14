@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 
 class GameException(Exception):
     pass
@@ -29,11 +30,13 @@ class Tower(GameObject):
 
 
 class Bug(GameObject):
-    def __init__(self, name=None, frame=None, x=None, y=None, colors=None):
+    def __init__(self, name=None, frame=None, x=None, y=None, colors=None, road=None):
         self.name = name
         self.frame = frame
         self.x = x
         self.y = y
+        self.steps = 0
+        self.road = deepcopy(road)
         if colors is None:
             self.colors = {}
         else:
@@ -48,6 +51,19 @@ class Bug(GameObject):
     @property
     def life(self):
         return sum([value for key, value in self.colors.iteritems()])
+
+    def move(self, frame):
+        if self.frame > frame:
+            return
+
+        position = self.road[(self.x, self.y)]
+        self.x = position[0]
+        self.y = position[1]
+        self.steps += 1
+
+    @property
+    def stepsLeft(self):
+        return len(self.road) - self.steps
             
 class Shoot(GameObject):
     def __init__(self, frame=None, towerName=None, bugName=None):
@@ -58,13 +74,3 @@ class Shoot(GameObject):
         super(Shoot, self).__init__()
 
 
-class GameState(GameObject):
-    def __init__(self, bugs, towers, actions, life, money, frame=0):
-        self.bugs = bugs
-        self.towers = towers
-        self.life = life
-        self.money = money
-        self.frame = frame
-
-    def next(self):
-        self.moveActiveBugs()
