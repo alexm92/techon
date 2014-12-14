@@ -1,0 +1,11 @@
+action=new_tower
+frame=0
+name=tower_0
+position=7,1
+colors=red:6168,yellow:1745
+
+action=shoot
+frame=0
+tower_name=tower_0
+bug_name=B1
+

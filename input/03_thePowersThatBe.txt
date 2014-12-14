@@ -1,0 +1,21 @@
+starting_life=15
+starting_money=10
+tower_range=2
+tower_cost=3
+reward_per_bug=2
+
+B1 red=9394 blue=15018 frame=0
+B2 red=6567 blue=15671 frame=4
+B3 red=29084 blue=7036 frame=7
+B4 red=33418 blue=25914 frame=14
+B5 red=14619 blue=8431 frame=15
+
+0 0 E 0 0 0 0 0 0
+0 0 1 0 0 0 1 1 X
+0 0 1 0 0 0 1 0 0
+0 1 1 0 0 0 1 0 0
+0 1 0 0 0 0 1 1 0
+0 1 1 1 0 0 0 1 0
+0 0 0 1 0 0 0 1 0
+0 0 0 1 0 0 0 1 0
+0 0 0 1 1 1 1 1 0

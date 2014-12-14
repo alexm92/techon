@@ -1,0 +1,26 @@
+starting_life=10
+starting_money=31
+tower_range=5
+tower_cost=6
+reward_per_bug=3
+
+B1 red=11899 yellow=22151 blue=15604  frame=0
+B2 red=8349 yellow=17064 blue=18960 frame=15
+B3 red=9451 yellow=10882 blue=6697 frame=29
+B4 red=9066 yellow=11807 blue=2756 frame=31
+B5 red=17978 yellow=20808 blue=8236 frame=37
+B6 red=18013 yellow=30227 blue=21389 frame=74
+B7 red=18848 yellow=27928 blue=12172 frame=91
+B8 red=20071 yellow=28594 blue=11846 frame=103
+
+X 1 1 1 1 1 1 1 1 1 1
+0 0 0 0 0 0 0 0 0 0 1
+1 1 1 1 1 1 1 1 1 0 1
+1 0 0 0 0 0 0 0 1 0 1
+1 0 1 1 1 1 1 0 1 0 1
+1 0 1 0 0 0 1 0 1 0 1
+1 0 1 0 0 E 1 0 1 0 1
+1 0 1 0 0 0 0 0 1 0 1
+1 0 1 1 1 1 1 1 1 0 1
+1 0 0 0 0 0 0 0 0 0 1
+1 1 1 1 1 1 1 1 1 1 1
